@@ -400,13 +400,13 @@
       { name: "清新马卡龙", colors: ["#ffb7b2", "#e2f0cb", "#c7ceea"] },
     ];
     const DEF_TEXTS = {
-      top: { label: "上方文本", value: "稳定", x: .5, y: .26, fs: 38, fw: 600, fc: "#111827" },
-      left: { label: "左下文本", value: "速度", x: .24, y: .7, fs: 38, fw: 600, fc: "#111827" },
-      right: { label: "右下文本", value: "便宜", x: .76, y: .7, fs: 38, fw: 600, fc: "#111827" },
-      overlapTopLeft: { label: "上左重叠文本", value: "贵", x: .36, y: .5, fs: 32, fw: 600, fc: "#fff" },
-      overlapTopRight: { label: "上右重叠文本", value: "慢", x: .64, y: .5, fs: 32, fw: 600, fc: "#fff" },
-      overlapBottom: { label: "下方重叠文本", value: "差", x: .5, y: .75, fs: 32, fw: 600, fc: "#fff" },
-      center: { label: "中心文本", value: "滚", x: .5, y: .57, fs: 38, fw: 700, fc: "#fff" },
+      top: { label: "上方文本", value: "稳定", fs: 38, fw: 600, fc: "#111827" },
+      left: { label: "左下文本", value: "速度", fs: 38, fw: 600, fc: "#111827" },
+      right: { label: "右下文本", value: "便宜", fs: 38, fw: 600, fc: "#111827" },
+      overlapTopLeft: { label: "上左重叠文本", value: "贵", fs: 32, fw: 600, fc: "#fff" },
+      overlapTopRight: { label: "上右重叠文本", value: "慢", fs: 32, fw: 600, fc: "#fff" },
+      overlapBottom: { label: "下方重叠文本", value: "差", fs: 32, fw: 600, fc: "#fff" },
+      center: { label: "中心文本", value: "滚", fs: 38, fw: 700, fc: "#fff" },
     };
     const initTexts = () => Object.fromEntries(Object.entries(DEF_TEXTS).map(([k, v]) => [k, { ...v, type: "text", img: null, scale: 1 }]));
 
@@ -474,10 +474,59 @@
           a.click();
         };
 
-        watch([mainRadius, () => circles.map(c => ({ ...c })), () => Object.fromEntries(Object.entries(texts).map(([k, t]) => [k, { value: t.value, type: t.type, scale: t.scale, fs: t.fs }]))], draw, { deep: true, immediate: true });
-        onMounted(draw);
+        const updateLayout = () => {
+          const r = mainRadius.value / SIZE;
+          const cs = circles.map(c => ({ x: c.cx, y: c.cy }));
+          const cent = { x: (cs[0].x + cs[1].x + cs[2].x) / 3, y: (cs[0].y + cs[1].y + cs[2].y) / 3 };
 
-        return { cvs, circles, texts, fmt, presets: PRESETS, loadImg, applyPreset, reset, save, mainRadius };
+          const len = v => Math.sqrt(v.x * v.x + v.y * v.y);
+          const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
+          const dot = (a, b) => a.x * b.x + a.y * b.y;
+          const norm = v => { const l = len(v); return l ? { x: v.x / l, y: v.y / l } : { x: 0, y: 0 }; };
+          const addVal = (p, v, s) => ({ x: p.x + v.x * s, y: p.y + v.y * s });
+
+          // Ray-Circle intersection to find exit distance
+          const getExitDist = (orig, dir, center, rad) => {
+            const V = sub(orig, center);
+            const b = 2 * dot(V, dir), c = dot(V, V) - rad * rad;
+            const delta = b * b - 4 * c;
+            return delta < 0 ? -1e9 : (-b + Math.sqrt(delta)) / 2;
+          };
+
+          // Single Regions
+          cs.forEach((c, i) => {
+            const dir = norm(sub(c, cent));
+            const outer = getExitDist(cent, dir, c, r);
+            const inner = Math.max(len(sub(c, cent)) - r, ...cs.map((n, j) => i === j ? -1e9 : getExitDist(cent, dir, n, r)));
+
+            const start = Math.max(0, inner);
+            const finalD = outer > start ? (start + outer) / 2 : len(sub(c, cent));
+
+            const target = i === 0 ? texts.top : i === 1 ? texts.left : texts.right;
+            Object.assign(target, addVal(cent, dir, finalD));
+          });
+
+          // Double Regions
+          [[0, 1, 2, "overlapTopLeft"], [0, 2, 1, "overlapTopRight"], [1, 2, 0, "overlapBottom"]].forEach(([i, j, k, name]) => {
+            const mid = { x: (cs[i].x + cs[j].x) / 2, y: (cs[i].y + cs[j].y) / 2 };
+            const dir = norm(sub(mid, cent));
+            const outer = getExitDist(cent, dir, cs[i], r);
+            const inner = getExitDist(cent, dir, cs[k], r);
+
+            const start = Math.max(0, inner);
+            const finalD = outer > start ? (start + outer) / 2 : len(sub(mid, cent));
+            Object.assign(texts[name], addVal(cent, dir, finalD));
+          });
+
+          // Center
+          Object.assign(texts.center, cent);
+        };
+
+        watch(mainRadius, updateLayout);
+        watch([mainRadius, () => circles.map(c => ({ ...c })), () => Object.fromEntries(Object.entries(texts).map(([k, t]) => [k, { ...t }]))], draw, { deep: true });
+        onMounted(() => { updateLayout(); draw(); });
+
+        return { cvs, circles, texts, fmt, presets: PRESETS, loadImg, applyPreset, reset: () => { reset(); updateLayout(); }, save, mainRadius };
       },
     }).mount("#app");
   </script>
